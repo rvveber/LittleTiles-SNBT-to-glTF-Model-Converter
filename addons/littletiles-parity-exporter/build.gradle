@@ -1,0 +1,99 @@
+plugins {
+    id 'eclipse'
+    id 'idea'
+    id 'net.neoforged.gradle.userdev' version '7.0.+'
+}
+
+def bytecodeTarget = 21
+def hostJava = JavaVersion.current().majorVersion.toInteger()
+
+gradle.beforeProject { p ->
+    if (!p.ext.has("modProperties"))
+        p.ext.modProperties = []
+    if (!p.ext.has("modDependencies"))
+        p.ext.modDependencies = []
+    if (!p.ext.has("modMixins"))
+        p.ext.modMixins = []
+    if (!p.ext.has("modImplemented"))
+        p.ext.modImplemented = []
+}
+
+gradle.afterProject { p ->
+    if (p.path == ":LittleTiles") {
+        // LittleTiles has optional integrations in main sources; provide them for standalone addon builds.
+        p.dependencies.add("compileOnly", "maven.modrinth:sodium:Pb3OXVqC")
+        p.dependencies.add("compileOnly", "maven.modrinth:iris:t3ruzodq")
+        p.dependencies.add("compileOnly", "curse.maven:theoneprobe-245211:5502323")
+        p.dependencies.add("compileOnly", "net.fabricmc:fabric-loader:${project.fabric_version}")
+        p.dependencies.add("compileOnly", "org.sinytra.forgified-fabric-api:fabric-api-base:0.4.42+d1308ded19")
+        p.dependencies.add("compileOnly", "org.sinytra.forgified-fabric-api:fabric-renderer-api-v1:3.4.0+acb05a3919")
+        p.dependencies.add("compileOnly", "org.sinytra.forgified-fabric-api:fabric-rendering-data-attachment-v1:0.3.48+73761d2e19")
+        p.dependencies.add("compileOnly", "org.sinytra.forgified-fabric-api:fabric-block-view-api-v2:1.0.10+9afaaf8c19")
+    }
+
+    p.plugins.withId("java") {
+        p.java.toolchain.languageVersion = JavaLanguageVersion.of(hostJava)
+        p.tasks.withType(JavaCompile).configureEach {
+            options.release = bytecodeTarget
+        }
+    }
+}
+
+group = "dev.rvveber.${project.mod_id}"
+version = project.mod_version
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(hostJava)
+
+repositories {
+    maven {
+        url "https://maven.su5ed.dev/releases"
+    }
+    maven {
+        url "https://cursemaven.com"
+        content {
+            includeGroup "curse.maven"
+        }
+    }
+    maven {
+        url = "https://api.modrinth.com/maven"
+    }
+    maven { url = 'https://maven.fabricmc.net' }
+    mavenCentral()
+}
+
+runs {
+    configureEach {
+        workingDirectory project.file('run')
+        systemProperty 'forge.logging.console.level', 'debug'
+    }
+
+    client {}
+    server {}
+}
+
+dependencies {
+    implementation "net.neoforged:neoforge:${project.neoforge_version}"
+
+    implementation project(':CreativeCore')
+    implementation project(':LittleTiles')
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    var props = [
+        mod_id: project.mod_id,
+        mod_name: project.mod_name,
+        mod_version: project.mod_version,
+        mod_authors: project.mod_authors,
+        mod_description: project.mod_description,
+        mod_display_url: project.mod_display_url,
+        minecraft_version: project.minecraft_version,
+        neoforge_version: project.neoforge_version,
+        creativecore_version: project.creativecore_version,
+        littletiles_version: project.littletiles_version,
+    ]
+
+    inputs.properties(props)
+    filesMatching("META-INF/neoforge.mods.toml") {
+        expand(props)
+    }
+}

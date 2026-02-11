@@ -1,0 +1,22 @@
+{
+  "name": "lt-import-gltf-poc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "POC CLI: parse LittleTiles /lt-import SNBT and export static glTF",
+  "type": "module",
+  "bin": {
+    "lt-import-to-gltf": "src/cli.mjs"
+  },
+  "scripts": {
+    "convert": "bun run src/cli.mjs",
+    "serve:textures": "node src/texture-server.mjs",
+    "parity-check": "bun run src/parity-debug-check.mjs",
+    "parity-check:json": "bun run src/parity-debug-check.mjs --json",
+    "parity-check:face-states": "bun run src/parity-debug-check.mjs --require-face-states",
+    "test:parser": "node --test test/**/*.test.mjs"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "mojangson": "^2.0.4"
+  }
+}

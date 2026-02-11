@@ -1,0 +1,13 @@
+# Local generated geometry outputs
+fixtures/outputs/*
+fixtures/inputs/*
+
+# Temporary files
+*.log
+.DS_Store
+.direnv/
+
+# Addon build outputs
+addons/littletiles-parity-exporter/.gradle/
+addons/littletiles-parity-exporter/build/
+addons/littletiles-parity-exporter/run/

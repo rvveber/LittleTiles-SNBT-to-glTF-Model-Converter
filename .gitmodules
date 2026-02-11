@@ -1,0 +1,6 @@
+[submodule "LittleTiles"]
+	path = subrepos/LittleTiles
+	url = https://github.com/CreativeMD/LittleTiles
+[submodule "CreativeCore"]
+	path = subrepos/CreativeCore
+	url = https://github.com/CreativeMD/CreativeCore

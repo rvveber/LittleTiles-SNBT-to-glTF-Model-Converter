@@ -1,0 +1,16 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.neoforged.net/releases' }
+        mavenCentral()
+    }
+}
+
+rootProject.name = "littletiles-parity-exporter"
+
+include(":CreativeCore")
+project(":CreativeCore").projectDir = file("../../subrepos/CreativeCore")
+
+include(":LittleTiles")
+project(":LittleTiles").projectDir = file("../../subrepos/LittleTiles")
+
