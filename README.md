@@ -9,7 +9,7 @@ Standalone LittleTiles import-to-glTF workbench.
 - `tools/lt-import-gltf-poc/` - Node/Bun standalone converter CLI
 - `addons/littletiles-parity-exporter/` - companion NeoForge addon scaffold for mod-side debug export commands
 - `docs/` - implementation notes, parity map, and project decisions
-- `fixtures/inputs/` - local standalone test inputs (`.txt`/`.struct`), texture reports (`*.textures.json`), and texture assets (`textures/...`)
+- `fixtures/inputs/` - local standalone test inputs (`.txt`/`.struct`) and optional texture assets (`textures/...`)
 - `fixtures/outputs/` - generated local outputs (`.gltf + .bin`)
 
 ## Quick Start

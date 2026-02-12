@@ -20,7 +20,7 @@ test('resolveMaterial keeps opaque default for solid tiles', () => {
 
   assert.equal(material.alphaMode, 'OPAQUE');
   assert.deepEqual(material.baseColorFactor, [1, 1, 1, 1]);
-  assert.equal(material.textureKey, null);
+  assert.equal(material.textureUri, 'textures/minecraft/block/stone.png');
 });
 
 test('resolveMaterial uses color alpha when present', () => {
@@ -52,19 +52,12 @@ test('resolveMaterial uses configurable inferred alpha for translucent blocks', 
   assert.deepEqual(material.baseColorFactor, [1, 1, 1, 0.2]);
 });
 
-test('resolveMaterial resolves texture URI from lookup and includes it in key', () => {
+test('resolveMaterial derives texture URI from block id and includes it in key', () => {
   const material = resolveMaterial({
     blockState: 'minecraft:oak_log[axis=y]',
     blockId: 'minecraft:oak_log',
     color: -1,
     providesSolidFace: true,
-  }, {
-    textureLookup: {
-      byBlockState: {
-        'minecraft:oak_log[axis=y]': 'textures/minecraft/block/oak_log.png',
-      },
-      byBlockId: {},
-    },
   });
 
   assert.equal(material.textureUri, 'textures/minecraft/block/oak_log.png');
@@ -72,115 +65,51 @@ test('resolveMaterial resolves texture URI from lookup and includes it in key', 
   assert.ok(material.materialKey.includes('textures/minecraft/block/oak_log.png'));
 });
 
-test('resolveMaterial resolves texture URI using legacy state aliases', () => {
+test('resolveMaterial applies legacy texture aliases from block state', () => {
   const material = resolveMaterial({
     blockState: 'minecraft:stone:2',
     blockId: 'minecraft:stone',
     color: -1,
     providesSolidFace: true,
-  }, {
-    textureLookup: {
-      byBlockState: {
-        'minecraft:polished_granite': 'textures/minecraft/block/polished_granite.png',
-      },
-      byBlockId: {},
-    },
   });
 
   assert.equal(material.textureUri, 'textures/minecraft/block/polished_granite.png');
 });
 
-test('resolveMaterial applies tint color from texture lookup metadata', () => {
+test('resolveMaterial applies texture URI prefix', () => {
   const material = resolveMaterial({
-    blockState: 'minecraft:birch_leaves',
-    blockId: 'minecraft:birch_leaves',
-    color: -1,
-    providesSolidFace: false,
-  }, {
-    textureLookup: {
-      byBlockState: {},
-      byBlockId: {},
-      tintByBlockState: {
-        'minecraft:birch_leaves': 0x80A755,
-      },
-      tintByBlockId: {},
-    },
-    translucentAlpha: 1,
-  });
-
-  assert.ok(material.baseColorFactor[0] < 1);
-  assert.ok(material.baseColorFactor[1] < 1);
-  assert.ok(material.baseColorFactor[2] < 1);
-});
-
-test('resolveMaterial does not apply tint when lookup has no tint metadata', () => {
-  const material = resolveMaterial({
-    blockState: 'minecraft:leaves:2',
-    blockId: 'minecraft:leaves',
-    color: -1,
-    providesSolidFace: false,
-  }, {
-    textureLookup: {
-      byBlockState: {},
-      byBlockId: {},
-    },
-    translucentAlpha: 1,
-  });
-
-  assert.equal(material.baseColorFactor[0], 1);
-  assert.equal(material.baseColorFactor[1], 1);
-  assert.equal(material.baseColorFactor[2], 1);
-});
-
-test('resolveMaterial forwards texture animation metadata from lookup', () => {
-  const material = resolveMaterial({
-    blockState: 'example:animated_block',
-    blockId: 'example:animated_block',
+    blockState: 'minecraft:stone',
+    blockId: 'minecraft:stone',
     color: -1,
     providesSolidFace: true,
   }, {
-    textureLookup: {
-      byBlockState: {
-        'example:animated_block': 'textures/example/block/animated.png',
-      },
-      byBlockId: {},
-      animationByTextureUri: {
-        'textures/example/block/animated.png': {
-          frameCount: 4,
-          frameTime: 2,
-          uvTransform: {
-            scale: [1, 0.25],
-            offset: [0, 0],
-          },
-        },
-      },
-    },
+    textureUriPrefix: '/assets',
   });
 
-  assert.equal(material.textureUri, 'textures/example/block/animated.png');
-  assert.equal(material.textureAnimation.frameCount, 4);
-  assert.deepEqual(material.textureAnimation.uvTransform.scale, [1, 0.25]);
+  assert.equal(material.textureUri, '/assets/textures/minecraft/block/stone.png');
 });
 
-test('resolveMaterial sets BLEND when texture has alpha channel metadata', () => {
+test('resolveMaterial emits static top-frame transform for known non-square textures', () => {
   const material = resolveMaterial({
-    blockState: 'example:glass_panel',
-    blockId: 'example:glass_panel',
+    blockState: 'littletiles:white_lava',
+    blockId: 'littletiles:white_lava',
     color: -1,
     providesSolidFace: true,
-  }, {
-    textureLookup: {
-      byBlockState: {
-        'example:glass_panel': 'textures/example/block/glass_panel.png',
-      },
-      byBlockId: {},
-      alphaByTextureUri: {
-        'textures/example/block/glass_panel.png': true,
-      },
-    },
   });
 
-  assert.equal(material.alphaMode, 'BLEND');
-  assert.equal(material.doubleSided, true);
-  assert.equal(material.baseColorFactor[3], 1);
+  assert.deepEqual(material.textureTransform, {
+    scale: [1, 1 / 20],
+    offset: [0, 0],
+  });
+});
+
+test('resolveMaterial emits no texture transform for normal square textures', () => {
+  const material = resolveMaterial({
+    blockState: 'minecraft:stone',
+    blockId: 'minecraft:stone',
+    color: -1,
+    providesSolidFace: true,
+  });
+
+  assert.equal(material.textureTransform, null);
 });

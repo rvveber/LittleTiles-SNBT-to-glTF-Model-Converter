@@ -150,11 +150,11 @@ test('writeGltf writes image/texture entries when material has texture URI', () 
   }
 });
 
-test('writeGltf emits KHR_animation_pointer texture animation tracks', () => {
+test('writeGltf emits KHR_texture_transform for static top-frame texture cropping', () => {
   const faces = [
     {
-      blockState: 'example:animated',
-      blockId: 'example:animated',
+      blockState: 'example:non_square',
+      blockId: 'example:non_square',
       color: -1,
       providesSolidFace: true,
       sourceKind: 'aabb',
@@ -167,26 +167,22 @@ test('writeGltf emits KHR_animation_pointer texture animation tracks', () => {
 
   const assembled = facesToPrimitiveMeshes(faces, {
     resolveMaterial: () => ({
-      materialKey: 'animated|textured',
-      materialName: 'example:animated',
+      materialKey: 'non-square|textured',
+      materialName: 'example:non_square',
       baseColorFactor: [1, 1, 1, 1],
       alphaMode: 'OPAQUE',
       alphaCutoff: null,
       doubleSided: false,
-      textureKey: 'textures/example/block/animated.png',
-      textureUri: 'textures/example/block/animated.png',
-      textureAnimation: {
-        frameCount: 4,
-        frameTime: 2,
-        uvTransform: {
-          scale: [1, 0.25],
-          offset: [0, 0],
-        },
+      textureKey: 'textures/example/block/non_square.png',
+      textureUri: 'textures/example/block/non_square.png',
+      textureTransform: {
+        scale: [1, 0.25],
+        offset: [0, 0],
       },
     }),
   });
 
-  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'lt-gltf-anim-'));
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'lt-gltf-transform-'));
   try {
     const gltfPath = path.join(tempDir, 'out.gltf');
     const binPath = path.join(tempDir, 'out.bin');
@@ -195,8 +191,6 @@ test('writeGltf emits KHR_animation_pointer texture animation tracks', () => {
 
     assert.ok(Array.isArray(gltf.extensionsUsed));
     assert.ok(gltf.extensionsUsed.includes('KHR_texture_transform'));
-    assert.ok(gltf.extensionsUsed.includes('KHR_animation_pointer'));
-    assert.equal(gltf.textures[0].extras.minecraftAnimation.frameCount, 4);
     assert.deepEqual(
       gltf.materials[0].pbrMetallicRoughness.baseColorTexture.extensions.KHR_texture_transform.scale,
       [1, 0.25]
@@ -205,24 +199,17 @@ test('writeGltf emits KHR_animation_pointer texture animation tracks', () => {
       gltf.materials[0].pbrMetallicRoughness.baseColorTexture.extensions.KHR_texture_transform.offset,
       [0, 0]
     );
-    assert.equal(gltf.animations.length, 1);
-    assert.equal(gltf.animations[0].channels.length, 1);
-    assert.equal(gltf.animations[0].samplers.length, 1);
-    assert.equal(gltf.animations[0].samplers[0].interpolation, 'STEP');
-    assert.equal(
-      gltf.animations[0].channels[0].target.extensions.KHR_animation_pointer.pointer,
-      '/materials/0/pbrMetallicRoughness/baseColorTexture/extensions/KHR_texture_transform/offset'
-    );
+    assert.equal(gltf.animations, undefined);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
-test('writeGltf keeps STEP interpolation even when texture metadata interpolate=true', () => {
+test('writeGltf emits no extensions when texture has no transform', () => {
   const faces = [
     {
-      blockState: 'example:animated_interpolate',
-      blockId: 'example:animated_interpolate',
+      blockState: 'example:static',
+      blockId: 'example:static',
       color: -1,
       providesSolidFace: true,
       sourceKind: 'aabb',
@@ -235,134 +222,26 @@ test('writeGltf keeps STEP interpolation even when texture metadata interpolate=
 
   const assembled = facesToPrimitiveMeshes(faces, {
     resolveMaterial: () => ({
-      materialKey: 'animated-interpolate|textured',
-      materialName: 'example:animated_interpolate',
+      materialKey: 'static|textured',
+      materialName: 'example:static',
       baseColorFactor: [1, 1, 1, 1],
       alphaMode: 'OPAQUE',
       alphaCutoff: null,
       doubleSided: false,
-      textureKey: 'textures/example/block/animated_interpolate.png',
-      textureUri: 'textures/example/block/animated_interpolate.png',
-      textureAnimation: {
-        frameCount: 2,
-        frameTime: 20,
-        interpolate: true,
-        frames: [
-          { index: 0, time: 20 },
-          { index: 1, time: 20 },
-        ],
-        uvTransform: {
-          scale: [1, 0.5],
-          offset: [0, 0],
-        },
-      },
+      textureKey: 'textures/example/block/static.png',
+      textureUri: 'textures/example/block/static.png',
+      textureTransform: null,
     }),
   });
 
-  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'lt-gltf-anim-step-'));
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'lt-gltf-no-transform-'));
   try {
     const gltfPath = path.join(tempDir, 'out.gltf');
     const binPath = path.join(tempDir, 'out.bin');
     writeGltf(assembled.meshes, gltfPath, { outBinPath: binPath });
     const gltf = JSON.parse(readFileSync(gltfPath, 'utf8'));
-    assert.equal(gltf.animations[0].samplers[0].interpolation, 'STEP');
-  } finally {
-    rmSync(tempDir, { recursive: true, force: true });
-  }
-});
-
-test('writeGltf repeats animated texture tracks to shared loop with t=0 keyframes', () => {
-  const faces = [
-    {
-      blockState: 'example:animated_a',
-      blockId: 'example:animated_a',
-      color: -1,
-      providesSolidFace: true,
-      sourceKind: 'aabb',
-      facing: 'NORTH',
-      faceType: 'axis',
-      outside: false,
-      vertices: quad(0),
-    },
-    {
-      blockState: 'example:animated_b',
-      blockId: 'example:animated_b',
-      color: -1,
-      providesSolidFace: true,
-      sourceKind: 'aabb',
-      facing: 'SOUTH',
-      faceType: 'axis',
-      outside: false,
-      vertices: quad(1),
-    },
-  ];
-
-  const assembled = facesToPrimitiveMeshes(faces, {
-    resolveMaterial: (face) => {
-      if (face.blockState.endsWith('_a')) {
-        return {
-          materialKey: 'animated-a|textured',
-          materialName: 'example:animated_a',
-          baseColorFactor: [1, 1, 1, 1],
-          alphaMode: 'OPAQUE',
-          alphaCutoff: null,
-          doubleSided: false,
-          textureKey: 'textures/example/block/animated_a.png',
-          textureUri: 'textures/example/block/animated_a.png',
-          textureAnimation: {
-            frameCount: 2,
-            frameTime: 1,
-            frames: [
-              { index: 0, time: 1 },
-              { index: 1, time: 2 },
-            ],
-            uvTransform: {
-              scale: [1, 0.5],
-              offset: [0, 0],
-            },
-          },
-        };
-      }
-      return {
-        materialKey: 'animated-b|textured',
-        materialName: 'example:animated_b',
-        baseColorFactor: [1, 1, 1, 1],
-        alphaMode: 'OPAQUE',
-        alphaCutoff: null,
-        doubleSided: false,
-        textureKey: 'textures/example/block/animated_b.png',
-        textureUri: 'textures/example/block/animated_b.png',
-        textureAnimation: {
-          frameCount: 2,
-          frameTime: 1,
-          frames: [
-            { index: 0, time: 1 },
-            { index: 1, time: 3 },
-          ],
-          uvTransform: {
-            scale: [1, 0.5],
-            offset: [0, 0],
-          },
-        },
-      };
-    },
-  });
-
-  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'lt-gltf-anim-loop-'));
-  try {
-    const gltfPath = path.join(tempDir, 'out.gltf');
-    const binPath = path.join(tempDir, 'out.bin');
-    writeGltf(assembled.meshes, gltfPath, { outBinPath: binPath });
-    const gltf = JSON.parse(readFileSync(gltfPath, 'utf8'));
-
-    assert.equal(gltf.animations.length, 1);
-    assert.equal(gltf.animations[0].samplers.length, 2);
-    for (const sampler of gltf.animations[0].samplers) {
-      const timeAccessor = gltf.accessors[sampler.input];
-      assert.equal(timeAccessor.min[0], 0);
-      assert.equal(timeAccessor.max[0], 0.6);
-      assert.equal(sampler.interpolation, 'STEP');
-    }
+    assert.equal(gltf.extensionsUsed, undefined);
+    assert.equal(gltf.animations, undefined);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }

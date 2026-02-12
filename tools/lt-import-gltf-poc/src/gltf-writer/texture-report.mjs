@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 
+import { BUILT_IN_TEXTURE_OVERRIDES } from './built-in-overrides.mjs';
+
 export function buildTextureLookupFromExportReport(report, options = {}) {
   const byBlockState = Object.create(null);
   const byBlockId = Object.create(null);
@@ -30,41 +32,95 @@ export function buildTextureLookupFromExportReport(report, options = {}) {
       animationByTextureUri[resolvedUri] = animation;
   }
 
+  // 1. Load built-in overrides first (so explicit report entries can overwrite them later if needed)
+  applyOverrides(BUILT_IN_TEXTURE_OVERRIDES, byBlockState, byBlockId, byTextureId);
+
   for (const block of report?.blockStates ?? []) {
     const textureIds = Array.isArray(block?.textureIds) ? block.textureIds : [];
     const uri = firstResolvedUri(textureIds, byTextureId);
+    
+    // Support per-face texture mapping if provided
+    let textureEntry = uri;
+    if (block?.textures && typeof block.textures === 'object') {
+      const map = {};
+      let hasUrl = false;
+      for (const [face, texId] of Object.entries(block.textures)) {
+        if (texId === null) {
+          map[face] = null; // Explicit cull
+          hasUrl = true; // null is a valid entry (instruction to cull)
+        } else {
+          const u = byTextureId[texId];
+          if (u) {
+            map[face] = u;
+            hasUrl = true;
+          }
+        }
+      }
+      if (hasUrl) textureEntry = map;
+    }
+
     const rawState = String(block?.blockState ?? '').trim();
     const canonicalState = String(block?.canonicalState ?? '').trim();
     const blockId = String(block?.blockId ?? '').trim();
     const tintColor = normalizeTintColor(block?.tintColor);
 
-    if (uri) {
+    if (textureEntry) {
       if (rawState)
-        byBlockState[rawState] = uri;
+        byBlockState[rawState] = textureEntry;
       if (canonicalState)
-        byBlockState[canonicalState] = uri;
+        byBlockState[canonicalState] = textureEntry;
       if (blockId && byBlockId[blockId] == null)
-        byBlockId[blockId] = uri;
+        byBlockId[blockId] = textureEntry;
     }
 
     if (tintColor != null) {
-      if (rawState)
-        tintByBlockState[rawState] = tintColor;
-      if (canonicalState)
-        tintByBlockState[canonicalState] = tintColor;
-      if (blockId && tintByBlockId[blockId] == null)
-        tintByBlockId[blockId] = tintColor;
+      if (rawState) tintByBlockState[rawState] = tintColor;
+      if (canonicalState) tintByBlockState[canonicalState] = tintColor;
+      if (blockId) tintByBlockId[blockId] = tintColor;
     }
   }
 
   return {
     byBlockState,
     byBlockId,
+    // ... rest of exports
     animationByTextureUri,
     alphaByTextureUri,
     tintByBlockState,
     tintByBlockId,
   };
+}
+
+function applyOverrides(overrides, byBlockState, byBlockId, byTextureId) {
+  if (!overrides || typeof overrides !== 'object') return;
+  
+  for (const [key, rules] of Object.entries(overrides)) {
+    if (!rules?.textures) continue;
+    
+    // Resolve texture IDs to URIs if possible, otherwise keep IDs or nulls
+    const resolvedTextures = {};
+    let hasEntry = false;
+    for (const [face, val] of Object.entries(rules.textures)) {
+        if (val === null) {
+            resolvedTextures[face] = null;
+            hasEntry = true;
+        } else if (typeof val === 'string') {
+            const uri = byTextureId[val];
+            if (uri) {
+                resolvedTextures[face] = uri;
+            } else {
+                // Keep the ID if we don't have a resolution (no report provided fallback)
+                resolvedTextures[face] = val;
+            }
+            hasEntry = true;
+        }
+    }
+
+    if (hasEntry) {
+       byBlockId[key] = resolvedTextures;
+       byBlockState[key] = resolvedTextures;
+    }
+  }
 }
 
 function firstResolvedUri(textureIds, byTextureId) {

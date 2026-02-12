@@ -3,8 +3,13 @@ const DEFAULT_TRANSLUCENT_ALPHA = 0.35;
 export function resolveMaterial(input, options = {}) {
   const blockState = String(input?.blockState ?? 'minecraft:air');
   const blockId = String(input?.blockId ?? blockStateName(blockState));
+  const facing = input?.facing;
   const argb = Number.isInteger(input?.color) ? input.color : -1;
-  const textureUri = resolveTextureUri(blockState, blockId, options.textureLookup);
+  const textureUri = resolveTextureUri(blockState, blockId, options.textureLookup, facing);
+
+  if (textureUri === false)
+    return null;
+
   const textureAnimation = resolveTextureAnimation(textureUri, options.textureLookup);
   const textureHasAlpha = resolveTextureHasAlpha(textureUri, options.textureLookup);
   const tintRgb = resolveTintRgb(blockState, blockId, options.textureLookup);
@@ -86,45 +91,81 @@ function blockStateName(state) {
   return state;
 }
 
-function resolveTextureUri(blockState, blockId, textureLookup) {
+function resolveTextureUri(blockState, blockId, textureLookup, facing) {
   if (!textureLookup || typeof textureLookup !== 'object')
     return null;
 
+  const resolveEntry = (entry) => {
+    if (typeof entry === 'string' && entry.length > 0)
+      return entry;
+    if (entry && typeof entry === 'object' && facing) {
+      if (entry[facing] === null)
+        return false;
+      if (typeof entry[facing] === 'string')
+        return entry[facing];
+
+      const fallbackMap = {
+        up: 'top',
+        down: 'bottom',
+        north: 'side',
+        south: 'side',
+        east: 'side',
+        west: 'side',
+      };
+      const fb = fallbackMap[facing];
+      if (fb) {
+        if (entry[fb] === null)
+          return false;
+        if (typeof entry[fb] === 'string')
+          return entry[fb];
+      }
+
+      const sideFb = 'side';
+      if (facing !== 'up' && facing !== 'down') {
+         // already checked specific + 'side' via fallbackMap, mostly just explicit side check here if needed?
+         // map implies north->side.
+      }
+
+      if (entry.all === null)
+        return false;
+      if (typeof entry.all === 'string')
+        return entry.all;
+    }
+    return undefined;
+  };
+
   const byBlockState = textureLookup.byBlockState;
   const byBlockId = textureLookup.byBlockId;
+  
   if (byBlockState && typeof byBlockState === 'object') {
-    const direct = byBlockState[blockState];
-    if (typeof direct === 'string' && direct.length > 0)
-      return direct;
+    const res = resolveEntry(byBlockState[blockState]);
+    if (res !== undefined) return res;
 
     const canonical = canonicalizeBlockState(blockState);
-    const fromCanonical = byBlockState[canonical];
-    if (typeof fromCanonical === 'string' && fromCanonical.length > 0)
-      return fromCanonical;
+    const resCanonical = resolveEntry(byBlockState[canonical]);
+    if (resCanonical !== undefined) return resCanonical;
   }
 
   if (byBlockId && typeof byBlockId === 'object') {
-    const fromId = byBlockId[blockId];
-    if (typeof fromId === 'string' && fromId.length > 0)
-      return fromId;
+    const res = resolveEntry(byBlockId[blockId]);
+    if (res !== undefined) return res;
   }
 
   const aliases = legacyTextureAliases(blockState, blockId);
   for (const alias of aliases) {
     if (byBlockState && typeof byBlockState === 'object') {
-      const fromState = byBlockState[alias];
-      if (typeof fromState === 'string' && fromState.length > 0)
-        return fromState;
-      const fromCanonicalAlias = byBlockState[canonicalizeBlockState(alias)];
-      if (typeof fromCanonicalAlias === 'string' && fromCanonicalAlias.length > 0)
-        return fromCanonicalAlias;
+      const res = resolveEntry(byBlockState[alias]);
+      if (res !== undefined) return res;
+      
+      const resCanonical = resolveEntry(byBlockState[canonicalizeBlockState(alias)]);
+      if (resCanonical !== undefined) return resCanonical;
     }
     if (byBlockId && typeof byBlockId === 'object') {
-      const fromAliasId = byBlockId[alias];
-      if (typeof fromAliasId === 'string' && fromAliasId.length > 0)
-        return fromAliasId;
+      const res = resolveEntry(byBlockId[alias]);
+      if (res !== undefined) return res;
     }
   }
+
   return null;
 }
 

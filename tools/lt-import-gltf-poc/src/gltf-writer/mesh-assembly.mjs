@@ -15,6 +15,9 @@ export function facesToPrimitiveMeshes(faces, options = {}) {
       transformableFaceCount++;
 
     const material = resolveMaterial(face, materialOptions);
+    if (!material)
+      continue;
+
     const groupKey = material.materialKey;
     let mesh = groups.get(groupKey);
     if (!mesh) {
@@ -579,9 +582,8 @@ function buildOffsetTrack(animation) {
     frames,
     frameCount,
     periodTicks,
-    // Minecraft texture frame animation is a frame index sequence.
-    // `.mcmeta interpolate=true` blends pixels between frames, not UV offset scrolling.
-    // UV-offset animation must remain STEP to preserve frame-by-frame behavior.
+    // UV-offset animation can represent frame selection, but not Minecraft's
+    // interpolate=true crossfade semantics. Keep STEP to avoid texture scrolling.
     interpolation: 'STEP',
   };
 }
@@ -728,7 +730,7 @@ function computeFaceUvs(face) {
 
 function computeAxisFaceUvs(face) {
   const facing = String(face?.facing ?? '');
-  const out = [];
+  const raw = [];
 
   for (const vertex of face.vertices) {
     const x = Number(vertex?.[0] ?? 0);
@@ -739,28 +741,28 @@ function computeAxisFaceUvs(face) {
 
     switch (facing) {
       case 'UP':
-        u = x;
-        v = z;
+        u = z;
+        v = -x;
         break;
       case 'DOWN':
-        u = x;
-        v = -z;
+        u = z;
+        v = -x;
         break;
       case 'NORTH':
         u = -x;
-        v = y;
+        v = -y;
         break;
       case 'SOUTH':
         u = x;
-        v = y;
+        v = -y;
         break;
       case 'WEST':
-        u = z;
-        v = y;
+        u = -z;
+        v = -y;
         break;
       case 'EAST':
-        u = -z;
-        v = y;
+        u = z;
+        v = -y;
         break;
       default:
         u = x;
@@ -768,10 +770,10 @@ function computeAxisFaceUvs(face) {
         break;
     }
 
-    out.push([u, v]);
+    raw.push([u, v]);
   }
 
-  return out;
+  return normalizeUvOrigin(raw);
 }
 
 function computePlanarFaceUvs(vertices) {
@@ -798,10 +800,30 @@ function computePlanarFaceUvs(vertices) {
   if (!isFiniteVec3(bitangent))
     bitangent = [0, 0, 1];
 
-  return vertices.map((point) => {
+  const raw = vertices.map((point) => {
     const delta = sub3(point, origin);
     return [dot3(delta, tangent), dot3(delta, bitangent)];
   });
+  return normalizeUvOrigin(raw);
+}
+
+function normalizeUvOrigin(uvs) {
+  if (!Array.isArray(uvs) || uvs.length === 0)
+    return [];
+
+  let minU = Infinity;
+  let minV = Infinity;
+  for (const uv of uvs) {
+    const u = Number(uv?.[0] ?? 0);
+    const v = Number(uv?.[1] ?? 0);
+    if (u < minU) minU = u;
+    if (v < minV) minV = v;
+  }
+
+  return uvs.map((uv) => [
+    Number(uv?.[0] ?? 0) - minU,
+    Number(uv?.[1] ?? 0) - minV,
+  ]);
 }
 
 function sub3(a, b) {

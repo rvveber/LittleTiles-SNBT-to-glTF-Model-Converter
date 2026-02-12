@@ -1,6 +1,6 @@
 # Local generated geometry outputs
 fixtures/outputs/*
-fixtures/inputs/*
+
 
 # Temporary files
 *.log

@@ -6,8 +6,8 @@ Static geometry converter for LittleTiles `/lt-import` SNBT data.
 
 - Target runtime: Node-style CLI (runs with Bun too)
 - Output convention: Y-up, `1 Minecraft block = 1.0 glTF unit`
-- Supports color/transparency materials and optional texture binding from addon texture reports
-- Exports texture frame animation tracks from `.png.mcmeta` metadata (structure animations and `extraRendering` remain out of scope)
+- Supports color/transparency materials and deterministic texture URI derivation from encoded block names
+- Texture animation export is intentionally out of scope (structure animations and `extraRendering` remain out of scope)
 - Includes `LittleTransformableBox` decoding and triangulation
 
 ## Install
@@ -34,10 +34,10 @@ Optional post-process optimization for web-viewer outputs:
 bun run src/cli.mjs ../../fixtures/inputs/empty\ wooden\ bucket.txt --out ./bucket.client.optimized.gltf --geometry-mode client --optimize
 ```
 
-Textured export using addon texture report:
+Textured export with URI prefix:
 
 ```bash
-bun run src/cli.mjs ../../fixtures/inputs/empty\ wooden\ bucket.txt --out ./bucket.textured.gltf --texture-report ../../fixtures/inputs/empty\ wooden\ bucket.textures.json
+bun run src/cli.mjs ../../fixtures/inputs/empty\ wooden\ bucket.txt --out ./bucket.textured.gltf --texture-uri-prefix /assets
 ```
 
 Texture sampling is always pixel-crisp (nearest-neighbor).
@@ -95,17 +95,14 @@ npm run serve:textures
 - Converter `--optimize` enables additional post-process cleanup passes for web-viewer-oriented output.
 - `writeGltf` emits `TEXCOORD_0` UVs for all faces so texture materials render correctly.
 - Converter writes glTF texture samplers as nearest-neighbor for pixel-crisp rendering.
-- If `--texture-base-uri` is omitted, converter auto-derives a relative URI prefix from output folder to texture-report folder.
+- Converter derives texture URIs from block IDs/state names (`textures/<namespace>/block/<path>.png`) and does not require addon texture reports.
+- `--texture-uri-prefix` (alias `--texture-base-uri`) prepends a static prefix to all derived texture URIs.
 - `serve:textures` starts an Express static server on `http://127.0.0.1:4173`, serving `/fixtures/**` so existing glTF-relative texture URIs resolve directly.
+- `serve:textures` now returns a fallback PNG for missing requests under `/fixtures/outputs/textures/textures/**/*.png` (disable with `--no-missing-texture-fallback` or provide custom fallback via `--missing-texture <path>`).
 - Converter or parity-check `--geometry-mode server` preserves parity-focused server-face semantics.
 - Running parity-check in `client` mode against older server-semantics `faceStates` fixtures may fail on transformable-heavy cases by design.
-- When a texture has `.mcmeta` animation metadata, converter emits `KHR_texture_transform` + `KHR_animation_pointer` tracks as the primary animation mode and also keeps raw metadata in `textures[*].extras.minecraftAnimation`.
-- Texture animation tracks preserve per-frame timing, start at `t=0`, and are written with `STEP` interpolation for frame-by-frame playback.
-- Mixed-period animated textures are repeated to a shared loop horizon (LCM-based with a cap) so shorter tracks do not freeze while longer tracks continue.
-- `.mcmeta` object-frame entries with `index: 0` are supported and preserved.
-- `.mcmeta interpolate=true` is retained in metadata but not mapped to linear glTF interpolation, because Minecraft-style pixel blending is not representable by UV offset animation.
-- PNG alpha-channel detection is source-backed (IHDR color type + optional `tRNS` chunk) and automatically promotes textured materials to `alphaMode: BLEND`.
-- Playback depends on viewer extension support (`KHR_animation_pointer` + `KHR_texture_transform`). `extras.minecraftAnimation` remains available as fallback metadata for custom runtimes.
+- Converter can emit static `KHR_texture_transform` for known non-square textures (top-frame crop only; no runtime animation tracks).
+- Texture files are not required at conversion time; missing URIs are allowed by design.
 
 ## Known Open Items (2026-02-11)
 
@@ -113,6 +110,5 @@ npm run serve:textures
   - `contemporary style house.json` (`124455 !== 127256`)
   - `empty wooden bucket.json` (`1014 !== 1158`)
   - `light_switch.json` (`40 !== 43`)
-- Tint is source-of-truth from texture reports only (no standalone hardcoded fallback). If `.textures.json` files are stale/missing `tintColor`, leaves can render untinted until `/lt-texture-export` is rerun.
 - Online validators/viewers may report `IO_ERROR: Failed to fetch` for absolute localhost texture URIs (`http://127.0.0.1:4173/...`) depending on execution context/CORS; this is separate from `NON_RELATIVE_URI` warnings.
-- Texture animation playback depends on runtime support for `KHR_animation_pointer`; unsupported viewers will show static textures.
+- Some derived texture URIs may not resolve in a given runtime/resource pack context; this is expected when blocks have no matching texture asset at the derived path.

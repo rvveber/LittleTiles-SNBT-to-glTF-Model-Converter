@@ -26,9 +26,10 @@ function main(argv) {
   const parsed = parseLtImportSnbt(raw, {
     defaultGrid: args.defaultGrid,
   });
+  
   const textureLookup = args.textureReport
     ? loadTextureLookup(args.textureReport, args.textureBaseUri, outputPath)
-    : null;
+    : buildTextureLookupFromExportReport(null);
 
   const meshes = boxesToPrimitiveMeshes(parsed, {
     evaluateInternalOcclusion: !args.noCull,
