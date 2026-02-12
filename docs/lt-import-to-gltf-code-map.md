@@ -27,7 +27,7 @@ Priority:
 
 Out of scope:
 - structure animations/timelines and structure-driven `extraRendering`.
-- texture frame animation export is in scope (via glTF material/texture extensions).
+- texture frame animation clip export from converter output (`KHR_texture_transform`, `KHR_animation_pointer`).
 
 Confirmed constraints and permissions:
 1. Outside-neighbor policy in standalone is always air.
@@ -35,6 +35,8 @@ Confirmed constraints and permissions:
 3. Mod-side debug exporter extension is allowed and expected for parity verification.
 4. Behavior should remain source-backed to LittleTiles/CreativeCore code in this repo.
 5. Main LittleTiles mod logic should not be changed directly; use companion addon.
+6. Converter must not depend on exported texture files or output-directory side artifacts at convert time.
+7. Texture URI derivation must come from SNBT block/material identity only (plus deterministic alias mapping).
 
 ## Repository Map
 - `subrepos/LittleTiles` upstream mod code (primary behavior source)
@@ -264,7 +266,6 @@ Parser-focused regression tests:
 - `tools/lt-import-gltf-poc/src/gltf-writer/occluder-ops.mjs`
 - `tools/lt-import-gltf-poc/src/gltf-writer/mesh-assembly.mjs`
 - `tools/lt-import-gltf-poc/src/gltf-writer/material-resolver.mjs`
-- `tools/lt-import-gltf-poc/src/gltf-writer/texture-report.mjs`
 - `tools/lt-import-gltf-poc/src/gltf-writer/debug-stats.mjs`
 - `tools/lt-import-gltf-poc/src/gltf-writer/runtime-face-behavior-profile.mjs`
 
@@ -277,9 +278,7 @@ Responsibilities:
 - occluder application and cutting
 - per-face debug summary helpers
 - color/transparency material resolution
-- optional texture URI binding from addon texture-export reports
-- optional texture animation metadata binding from exported `.png.mcmeta`
-- glTF texture animation track emission (`KHR_texture_transform` + `KHR_animation_pointer`)
+- deterministic texture URI derivation from block/material identity in SNBT
 - glTF mesh primitive assembly grouped by resolved material key
 - runtime face behavior profile for game-observed behavior deltas only
 
@@ -379,18 +378,10 @@ Texture export strategy contracts:
 - no assumption of a single global texture atlas (supports mixed-mod namespaces).
 - `.png.mcmeta` files are copied with textures and surfaced to standalone for animation metadata extraction.
 
-Texture animation export contract (2026-02-11):
-- primary mode is glTF extension-driven:
-  - `KHR_texture_transform` is attached to `materials[*].pbrMetallicRoughness.baseColorTexture.extensions`
-  - `KHR_animation_pointer` channels target the transform `offset` path.
-- animation samplers are always `STEP` for frame-by-frame behavior.
-- `.mcmeta` `interpolate: true` is preserved as metadata but not mapped to glTF linear interpolation:
-  - Minecraft interpolation blends pixels between frames; UV-offset animation cannot express that blend.
-- tracks are repeated to a shared loop duration so mixed-period animated textures do not freeze mid-clip:
-  - loop duration is LCM-based with a safety cap (`MAX_SHARED_LOOP_TICKS = 4800`); on cap overflow fallback is max single-track period.
-- keyframe times start at `t=0` and close at the loop boundary with the first frame value.
-- `.mcmeta` object-frame entries with `index: 0` are valid and must be preserved.
-- raw parsed animation metadata remains in `textures[*].extras.minecraftAnimation` for debugging/fallback runtime use.
+Texture animation responsibility split (current):
+- converter output remains static texture binding only.
+- converter does not parse `.mcmeta` and does not emit glTF animation channels for texture frames.
+- `.mcmeta` sidecars are consumed by `tools/lt-3d-viewer` runtime adaptation (`docs/gltf-viewer-mcmeta-code-map.md`).
 
 ## Parity Debug JSON: Expected Shape
 Common top-level keys:
@@ -444,11 +435,7 @@ Current status:
   - `light_switch.json`: `40 !== 43`
 - material/texture focused tests pass:
   - `tools/lt-import-gltf-poc/test/material-resolver.test.mjs`
-  - `tools/lt-import-gltf-poc/test/texture-report.test.mjs`
   - `tools/lt-import-gltf-poc/test/mesh-assembly-materials.test.mjs`
-- texture animation regressions covered:
-  - `texture-report.test.mjs`: object-frame `index: 0` preservation
-  - `mesh-assembly-materials.test.mjs`: shared-loop repetition + `t=0` keyframe start + `STEP` interpolation
 - parity checker fixture pass-rate should be re-validated after refreshing parity fixtures/baselines.
 - canonical fixture checks are currently run in `client` geometry mode (`geometryMode: "client"` in fixtures).
 - web-viewer cleanup is separated from parity via converter `--optimize` (default off), so client parity fixtures remain unoptimized.
@@ -469,8 +456,8 @@ Canonical parity outcomes that should remain true:
 
 2. Tint source-of-truth enforcement:
 - standalone converter no longer applies hardcoded foliage tint fallback.
-- tint is now applied only from texture report metadata (`tintColor`/`tintColorHex`).
-- required follow-up: regenerate all `.textures.json` reports via `/lt-texture-export` before validating textured leaves output.
+- converter currently derives texture URI from SNBT block/material identity only.
+- required follow-up: if tint parity is needed later, add explicit SNBT-driven tint contract.
 
 3. Browser validator/viewer texture IO failures:
 - online glTF validator/viewers can report `IO_ERROR: Failed to fetch` for absolute `http://127.0.0.1:4173/...` texture URIs.
@@ -483,12 +470,11 @@ Canonical parity outcomes that should remain true:
 
 5. Still-open scope gaps from earlier decisions:
 - structure-driven `extraRendering` is still not exported in standalone glTF.
-- block behavior/material parity is still partial outside current source-backed rules and overrides.
+- block behavior/material parity is still partial outside current source-backed rules.
 
 6. Texture animation runtime compatibility boundaries:
-- exported clips require viewer/runtime support for both `KHR_animation_pointer` and `KHR_texture_transform`.
-- viewers lacking these extensions will show static textures even though metadata is present.
-- exact Minecraft-style pixel blending for `.mcmeta interpolate=true` is still not representable with UV-offset animation alone.
+- base converter output is static texture binding only (no `.mcmeta`-driven clip export path).
+- Minecraft-style `.mcmeta` animation behavior is handled in `tools/lt-3d-viewer` runtime adaptation.
 
 ## Key Standalone Breakthroughs To Preserve
 1. Parser boundary hardening and DI:
@@ -511,10 +497,10 @@ Canonical parity outcomes that should remain true:
 - parity checker and exporter diagnostics support transformable cache comparisons and runtime metadata surfacing.
 - fixture-based parity remains the contract; local fixture artifacts may be regenerated and are not always committed.
 
-5. Texture animation parity stabilization:
-- animation tracks now use explicit frame timing from `.mcmeta` with `STEP` sampling.
-- tracks share a loop horizon so multi-texture animations keep cycling together.
-- zero-time origin and `index: 0` frame parsing are regression-covered and should not be relaxed.
+5. Texture URI determinism and runtime split:
+- material resolver now derives texture URI from SNBT block/material identity with explicit alias mapping.
+- converter no longer consumes texture-report artifacts or output texture metadata at convert time.
+- Minecraft `.mcmeta` animation/emissive behavior is delegated to viewer runtime adaptation.
 
 ## Validation Corpus And Commands
 Required corpus paths:
@@ -529,7 +515,7 @@ Core commands:
 - converter:
   - `node tools/lt-import-gltf-poc/src/cli.mjs <input> --out <output.gltf>`
   - `node tools/lt-import-gltf-poc/src/cli.mjs <input> --out <output.gltf> --optimize`
-  - `node tools/lt-import-gltf-poc/src/cli.mjs <input> --out <output.gltf> --texture-report <basename.textures.json>`
+  - `node tools/lt-import-gltf-poc/src/cli.mjs <input> --out <output.gltf> --texture-base-uri <prefix>`
 - parity checker:
   - `node tools/lt-import-gltf-poc/src/parity-debug-check.mjs <json-file-or-dir>`
   - `node tools/lt-import-gltf-poc/src/parity-debug-check.mjs --json <json-file-or-dir>`

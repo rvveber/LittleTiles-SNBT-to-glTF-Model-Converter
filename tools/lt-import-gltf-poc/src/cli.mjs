@@ -3,40 +3,42 @@ import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { parseLtImportSnbt, ParseError } from './lt-import-parser.mjs';
 import { boxesToPrimitiveMeshes, writeGltf } from './gltf-writer.mjs';
-import { buildTextureLookupFromExportReport } from './gltf-writer/texture-report.mjs';
 import { GEOMETRY_MODES } from './gltf-writer/postprocess-faces.mjs';
 
 function main(argv) {
   const args = parseArgs(argv);
+  if (!args.input && !process.stdin.isTTY)
+    args.input = '-';
 
   if (args.help || !args.input) {
     printHelp();
     process.exit(args.help ? 0 : 1);
   }
 
-  const inputPath = path.resolve(args.input);
+  const readsStdin = args.input === '-';
+  const inputPath = readsStdin ? '<stdin>' : path.resolve(args.input);
+  if (readsStdin && !args.output)
+    throw new ParseError('`--out <output.gltf>` is required when reading input from stdin.');
   const outputPath = path.resolve(
-    args.output || defaultOutputPath(inputPath)
+    args.output || defaultOutputPath(path.resolve(args.input))
   );
   const outBinPath = path.resolve(
     args.bin || defaultBinPath(outputPath)
   );
 
-  const raw = readFileSync(inputPath, 'utf8');
+  const raw = readsStdin
+    ? readFileSync(0, 'utf8')
+    : readFileSync(inputPath, 'utf8');
   const parsed = parseLtImportSnbt(raw, {
     defaultGrid: args.defaultGrid,
   });
   
-  const textureLookup = args.textureReport
-    ? loadTextureLookup(args.textureReport, args.textureBaseUri, outputPath)
-    : buildTextureLookupFromExportReport(null);
-
   const meshes = boxesToPrimitiveMeshes(parsed, {
     evaluateInternalOcclusion: !args.noCull,
     geometryMode: args.geometryMode,
     optimize: args.optimize,
     materialOptions: {
-      textureLookup,
+      textureUriPrefix: args.textureBaseUri,
     },
   });
 
@@ -66,7 +68,6 @@ function parseArgs(argv) {
     input: null,
     output: null,
     bin: null,
-    textureReport: null,
     textureBaseUri: '',
     geometryMode: 'client',
     optimize: false,
@@ -100,12 +101,12 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === '--texture-report') {
-      out.textureReport = argv[++i] ?? null;
+    if (arg === '--texture-base-uri') {
+      out.textureBaseUri = argv[++i] ?? '';
       continue;
     }
 
-    if (arg === '--texture-base-uri') {
+    if (arg === '--texture-uri-prefix') {
       out.textureBaseUri = argv[++i] ?? '';
       continue;
     }
@@ -150,50 +151,19 @@ function printHelp() {
   console.log(`LittleTiles /lt-import -> glTF POC\n
 Usage:
   lt-import-to-gltf <input.snbt|.txt|.struct> [output.gltf]
+  lt-import-to-gltf - --out <output.gltf> [--bin <output.bin>] < input.struct
   lt-import-to-gltf <input> --out <output.gltf> [--bin <output.bin>]
-  lt-import-to-gltf <input> --out <output.gltf> --texture-report <report.textures.json> [--texture-base-uri <prefix>]
 
 Options:
   --no-cull            Disable internal face culling (including partial-overlap culling).
   --default-grid <n>   Fallback grid when SNBT omits \"grid\" (default: 16).
-  --texture-report     Texture export report produced by /lt-texture-export.
-  --texture-base-uri   Optional URI prefix prepended to report texture URIs.
-                       If omitted, prefix is auto-derived from output folder to report folder.
+  --texture-base-uri   Optional URI prefix prepended to derived texture URIs.
+  --texture-uri-prefix Alias of --texture-base-uri.
+                       If omitted, no prefix is added.
   --geometry-mode <id> Geometry output mode: ${GEOMETRY_MODES.join(', ')} (default: client).
   --optimize           Apply post-process optimization passes (client mode only).
   -h, --help           Show this help.
 `);
-}
-
-function loadTextureLookup(reportPath, uriPrefix, outputPath) {
-  const resolvedReportPath = path.resolve(reportPath);
-  const raw = readFileSync(resolvedReportPath, 'utf8');
-  const report = JSON.parse(raw);
-  const resolvedUriPrefix = resolveTextureUriPrefix(uriPrefix, resolvedReportPath, outputPath);
-  return buildTextureLookupFromExportReport(report, {
-    uriPrefix: resolvedUriPrefix,
-    reportPath: resolvedReportPath,
-  });
-}
-
-function resolveTextureUriPrefix(uriPrefix, reportPath, outputPath) {
-  const explicit = String(uriPrefix ?? '').trim();
-  if (explicit)
-    return explicit;
-
-  const outputDir = path.dirname(path.resolve(outputPath));
-  const reportDir = path.dirname(path.resolve(reportPath));
-  const relative = path.relative(outputDir, reportDir);
-  if (!relative || relative === '.')
-    return '';
-  return toPosixPath(relative);
-}
-
-function toPosixPath(value) {
-  const normalized = String(value ?? '').trim().replaceAll(path.sep, '/');
-  if (!normalized || normalized === '.')
-    return '';
-  return normalized.endsWith('/') ? normalized : `${normalized}/`;
 }
 
 function normalizeGeometryMode(raw) {

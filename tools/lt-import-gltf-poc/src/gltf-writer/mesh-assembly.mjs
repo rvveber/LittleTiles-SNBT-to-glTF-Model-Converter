@@ -730,50 +730,43 @@ function computeFaceUvs(face) {
 
 function computeAxisFaceUvs(face) {
   const facing = String(face?.facing ?? '');
+  const uvBasis = resolveAxisUvBasis(face, facing);
   const raw = [];
 
   for (const vertex of face.vertices) {
     const x = Number(vertex?.[0] ?? 0);
     const y = Number(vertex?.[1] ?? 0);
     const z = Number(vertex?.[2] ?? 0);
-    let u = x;
-    let v = y;
-
-    switch (facing) {
-      case 'UP':
-        u = z;
-        v = -x;
-        break;
-      case 'DOWN':
-        u = z;
-        v = -x;
-        break;
-      case 'NORTH':
-        u = -x;
-        v = -y;
-        break;
-      case 'SOUTH':
-        u = x;
-        v = -y;
-        break;
-      case 'WEST':
-        u = -z;
-        v = -y;
-        break;
-      case 'EAST':
-        u = z;
-        v = -y;
-        break;
-      default:
-        u = x;
-        v = y;
-        break;
-    }
+    const u = x * uvBasis.u[0] + y * uvBasis.u[1] + z * uvBasis.u[2];
+    const v = x * uvBasis.v[0] + y * uvBasis.v[1] + z * uvBasis.v[2];
 
     raw.push([u, v]);
   }
 
   return normalizeUvOrigin(raw);
+}
+
+function resolveAxisUvBasis(face, worldFacing) {
+  const defaultBasis = DEFAULT_AXIS_FACE_UV_BASIS[worldFacing];
+  if (!defaultBasis)
+    return FALLBACK_UV_BASIS;
+
+  const rotation = resolveStateRotation(face?.blockState);
+  if (!rotation)
+    return defaultBasis;
+
+  const worldNormal = FACING_NORMAL[worldFacing];
+  if (!worldNormal)
+    return defaultBasis;
+
+  const localNormal = rotateVectorInverse(worldNormal, rotation);
+  const localFacing = nearestFacingFromNormal(localNormal);
+  const localBasis = DEFAULT_AXIS_FACE_UV_BASIS[localFacing] ?? defaultBasis;
+
+  return {
+    u: rotateVector(localBasis.u, rotation),
+    v: rotateVector(localBasis.v, rotation),
+  };
 }
 
 function computePlanarFaceUvs(vertices) {
@@ -859,4 +852,195 @@ function isFiniteVec3(v) {
     Number.isFinite(v[1]) &&
     Number.isFinite(v[2])
   );
+}
+
+const FALLBACK_UV_BASIS = Object.freeze({
+  u: [1, 0, 0],
+  v: [0, 1, 0],
+});
+
+// Matches Minecraft's default block-model UV basis for unrotated elements.
+const DEFAULT_AXIS_FACE_UV_BASIS = Object.freeze({
+  DOWN: Object.freeze({ u: [0, 0, 1], v: [-1, 0, 0] }),
+  UP: Object.freeze({ u: [0, 0, 1], v: [-1, 0, 0] }),
+  NORTH: Object.freeze({ u: [-1, 0, 0], v: [0, -1, 0] }),
+  SOUTH: Object.freeze({ u: [1, 0, 0], v: [0, -1, 0] }),
+  WEST: Object.freeze({ u: [0, 0, 1], v: [0, -1, 0] }),
+  EAST: Object.freeze({ u: [0, 0, -1], v: [0, -1, 0] }),
+});
+
+const FACING_NORMAL = Object.freeze({
+  DOWN: Object.freeze([0, -1, 0]),
+  UP: Object.freeze([0, 1, 0]),
+  NORTH: Object.freeze([0, 0, -1]),
+  SOUTH: Object.freeze([0, 0, 1]),
+  WEST: Object.freeze([-1, 0, 0]),
+  EAST: Object.freeze([1, 0, 0]),
+});
+
+const BLOCK_STATE_PROPERTY_CACHE = new Map();
+
+function resolveStateRotation(blockStateRaw) {
+  const props = parseBlockStateProperties(blockStateRaw);
+  if (!props)
+    return null;
+
+  const axis = String(props.axis ?? '').trim().toLowerCase();
+  if (axis === 'z')
+    return { x: 90, y: 0, z: 0 };
+  if (axis === 'x')
+    return { x: 90, y: 90, z: 0 };
+  if (axis === 'y')
+    return { x: 0, y: 0, z: 0 };
+
+  const facing = String(props.facing ?? props.horizontal_facing ?? '').trim().toLowerCase();
+  if (facing === 'north')
+    return { x: 0, y: 0, z: 0 };
+  if (facing === 'south')
+    return { x: 0, y: 180, z: 0 };
+  if (facing === 'west')
+    return { x: 0, y: 270, z: 0 };
+  if (facing === 'east')
+    return { x: 0, y: 90, z: 0 };
+  if (facing === 'up')
+    return { x: 270, y: 0, z: 0 };
+  if (facing === 'down')
+    return { x: 90, y: 0, z: 0 };
+
+  const rotationRaw = props.rotation;
+  const rotation = Number.parseInt(String(rotationRaw ?? ''), 10);
+  if (Number.isInteger(rotation))
+    return { x: 0, y: rotation * 22.5, z: 0 };
+
+  return null;
+}
+
+function parseBlockStateProperties(blockStateRaw) {
+  const key = String(blockStateRaw ?? '');
+  if (BLOCK_STATE_PROPERTY_CACHE.has(key))
+    return BLOCK_STATE_PROPERTY_CACHE.get(key);
+
+  const start = key.indexOf('[');
+  const end = key.lastIndexOf(']');
+  if (start < 0 || end <= start) {
+    BLOCK_STATE_PROPERTY_CACHE.set(key, null);
+    return null;
+  }
+
+  const inside = key.slice(start + 1, end).trim();
+  if (!inside) {
+    BLOCK_STATE_PROPERTY_CACHE.set(key, null);
+    return null;
+  }
+
+  const props = {};
+  const entries = inside.split(',');
+  for (const entry of entries) {
+    const [k, v] = entry.split('=');
+    const propKey = String(k ?? '').trim();
+    if (!propKey)
+      continue;
+    props[propKey] = String(v ?? '').trim();
+  }
+
+  const resolved = Object.keys(props).length > 0 ? props : null;
+  BLOCK_STATE_PROPERTY_CACHE.set(key, resolved);
+  return resolved;
+}
+
+function rotateVector(vector, rotation) {
+  let out = [
+    Number(vector?.[0] ?? 0),
+    Number(vector?.[1] ?? 0),
+    Number(vector?.[2] ?? 0),
+  ];
+
+  out = rotateVectorX(out, rotation?.x ?? 0);
+  out = rotateVectorY(out, rotation?.y ?? 0);
+  out = rotateVectorZ(out, rotation?.z ?? 0);
+  return sanitizeVector(out);
+}
+
+function rotateVectorInverse(vector, rotation) {
+  let out = [
+    Number(vector?.[0] ?? 0),
+    Number(vector?.[1] ?? 0),
+    Number(vector?.[2] ?? 0),
+  ];
+
+  out = rotateVectorZ(out, -(rotation?.z ?? 0));
+  out = rotateVectorY(out, -(rotation?.y ?? 0));
+  out = rotateVectorX(out, -(rotation?.x ?? 0));
+  return sanitizeVector(out);
+}
+
+function rotateVectorX(v, degrees) {
+  const rad = toRadians(degrees);
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  return [
+    v[0],
+    v[1] * c - v[2] * s,
+    v[1] * s + v[2] * c,
+  ];
+}
+
+function rotateVectorY(v, degrees) {
+  const rad = toRadians(degrees);
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  return [
+    v[0] * c + v[2] * s,
+    v[1],
+    -v[0] * s + v[2] * c,
+  ];
+}
+
+function rotateVectorZ(v, degrees) {
+  const rad = toRadians(degrees);
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  return [
+    v[0] * c - v[1] * s,
+    v[0] * s + v[1] * c,
+    v[2],
+  ];
+}
+
+function toRadians(degrees) {
+  const value = Number(degrees);
+  if (!Number.isFinite(value))
+    return 0;
+  return value * (Math.PI / 180);
+}
+
+function sanitizeVector(vector) {
+  return vector.map((component) => sanitizeComponent(component));
+}
+
+function sanitizeComponent(value) {
+  if (!Number.isFinite(value))
+    return 0;
+  if (Math.abs(value) < 1e-12)
+    return 0;
+  const rounded = Math.round(value);
+  if (Math.abs(value - rounded) < 1e-12)
+    return rounded;
+  return value;
+}
+
+function nearestFacingFromNormal(normal) {
+  let bestFacing = 'UP';
+  let bestDot = -Infinity;
+  for (const [facing, axisNormal] of Object.entries(FACING_NORMAL)) {
+    const dot =
+      normal[0] * axisNormal[0] +
+      normal[1] * axisNormal[1] +
+      normal[2] * axisNormal[2];
+    if (dot > bestDot) {
+      bestDot = dot;
+      bestFacing = facing;
+    }
+  }
+  return bestFacing;
 }

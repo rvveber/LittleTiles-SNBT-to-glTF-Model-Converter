@@ -10,7 +10,7 @@ test('rgbaFromArgb decodes signed int ARGB', () => {
   assert.ok(Math.abs(rgba[3] - (128 / 255)) < 1e-9);
 });
 
-test('resolveMaterial keeps opaque default for solid tiles', () => {
+test('resolveMaterial defaults textured solid tiles to MASK when alpha metadata is unknown', () => {
   const material = resolveMaterial({
     blockState: 'minecraft:stone',
     blockId: 'minecraft:stone',
@@ -18,9 +18,24 @@ test('resolveMaterial keeps opaque default for solid tiles', () => {
     providesSolidFace: true,
   });
 
-  assert.equal(material.alphaMode, 'OPAQUE');
+  assert.equal(material.alphaMode, 'MASK');
+  assert.equal(material.alphaCutoff, 0.5);
   assert.deepEqual(material.baseColorFactor, [1, 1, 1, 1]);
   assert.equal(material.textureUri, 'textures/minecraft/block/stone.png');
+});
+
+test('resolveMaterial keeps textured solid tiles opaque when alpha assumption is disabled', () => {
+  const material = resolveMaterial({
+    blockState: 'minecraft:stone',
+    blockId: 'minecraft:stone',
+    color: -1,
+    providesSolidFace: true,
+  }, {
+    assumeTextureAlpha: false,
+  });
+
+  assert.equal(material.alphaMode, 'OPAQUE');
+  assert.equal(material.alphaCutoff, null);
 });
 
 test('resolveMaterial uses color alpha when present', () => {
@@ -52,19 +67,6 @@ test('resolveMaterial uses configurable inferred alpha for translucent blocks', 
   assert.deepEqual(material.baseColorFactor, [1, 1, 1, 0.2]);
 });
 
-test('resolveMaterial derives texture URI from block id and includes it in key', () => {
-  const material = resolveMaterial({
-    blockState: 'minecraft:oak_log[axis=y]',
-    blockId: 'minecraft:oak_log',
-    color: -1,
-    providesSolidFace: true,
-  });
-
-  assert.equal(material.textureUri, 'textures/minecraft/block/oak_log.png');
-  assert.equal(material.textureKey, 'textures/minecraft/block/oak_log.png');
-  assert.ok(material.materialKey.includes('textures/minecraft/block/oak_log.png'));
-});
-
 test('resolveMaterial applies legacy texture aliases from block state', () => {
   const material = resolveMaterial({
     blockState: 'minecraft:stone:2',
@@ -76,7 +78,7 @@ test('resolveMaterial applies legacy texture aliases from block state', () => {
   assert.equal(material.textureUri, 'textures/minecraft/block/polished_granite.png');
 });
 
-test('resolveMaterial applies texture URI prefix', () => {
+test('resolveMaterial applies texture URI prefix to derived texture URI', () => {
   const material = resolveMaterial({
     blockState: 'minecraft:stone',
     blockId: 'minecraft:stone',
@@ -87,29 +89,4 @@ test('resolveMaterial applies texture URI prefix', () => {
   });
 
   assert.equal(material.textureUri, '/assets/textures/minecraft/block/stone.png');
-});
-
-test('resolveMaterial emits static top-frame transform for known non-square textures', () => {
-  const material = resolveMaterial({
-    blockState: 'littletiles:white_lava',
-    blockId: 'littletiles:white_lava',
-    color: -1,
-    providesSolidFace: true,
-  });
-
-  assert.deepEqual(material.textureTransform, {
-    scale: [1, 1 / 20],
-    offset: [0, 0],
-  });
-});
-
-test('resolveMaterial emits no texture transform for normal square textures', () => {
-  const material = resolveMaterial({
-    blockState: 'minecraft:stone',
-    blockId: 'minecraft:stone',
-    color: -1,
-    providesSolidFace: true,
-  });
-
-  assert.equal(material.textureTransform, null);
 });

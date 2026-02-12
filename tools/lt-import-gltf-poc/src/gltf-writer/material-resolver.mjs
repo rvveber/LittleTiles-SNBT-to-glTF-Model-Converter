@@ -1,20 +1,18 @@
 const DEFAULT_TRANSLUCENT_ALPHA = 0.35;
+const DEFAULT_ALPHA_CUTOFF = 0.5;
 
 export function resolveMaterial(input, options = {}) {
   const blockState = String(input?.blockState ?? 'minecraft:air');
   const blockId = String(input?.blockId ?? blockStateName(blockState));
-  const facing = input?.facing;
   const argb = Number.isInteger(input?.color) ? input.color : -1;
-  const textureUri = resolveTextureUri(blockState, blockId, options.textureLookup, facing);
+  const textureUri = resolveTextureUri(blockState, blockId, options);
 
-  if (textureUri === false)
+  if (!textureUri)
     return null;
 
-  const textureAnimation = resolveTextureAnimation(textureUri, options.textureLookup);
-  const textureHasAlpha = resolveTextureHasAlpha(textureUri, options.textureLookup);
-  const tintRgb = resolveTintRgb(blockState, blockId, options.textureLookup);
   const rgba = rgbaFromArgb(argb);
   const inferredTranslucent = input?.providesSolidFace === false;
+  const assumeTextureAlpha = options.assumeTextureAlpha !== false;
   const inferredAlpha = clamp01(
     Number.isFinite(options.translucentAlpha)
       ? options.translucentAlpha
@@ -26,27 +24,39 @@ export function resolveMaterial(input, options = {}) {
       ? rgba[3]
       : (inferredTranslucent ? inferredAlpha : 1)
   );
-  const hasTranslucency = baseAlpha < 1 || textureHasAlpha;
+  const textureSupportsAlpha = (
+    assumeTextureAlpha &&
+    typeof textureUri === 'string' &&
+    textureUri.length > 0
+  );
 
-  const tintedRgb = applyTintRgb([rgba[0], rgba[1], rgba[2]], tintRgb);
+  let alphaMode = 'OPAQUE';
+  let alphaCutoff = null;
 
-  const out = {
+  if (baseAlpha < 1) {
+    alphaMode = 'BLEND';
+  } else if (textureSupportsAlpha) {
+    alphaMode = 'MASK';
+    alphaCutoff = normalizeAlphaCutoff(options.alphaCutoff, DEFAULT_ALPHA_CUTOFF);
+  }
+
+  const hasTranslucency = alphaMode !== 'OPAQUE';
+
+  return {
     materialKey: materialKey({
       blockId,
       textureUri,
-      rgba: [tintedRgb[0], tintedRgb[1], tintedRgb[2], baseAlpha],
+      rgba: [rgba[0], rgba[1], rgba[2], baseAlpha],
     }),
     materialName: blockState,
-    baseColorFactor: [tintedRgb[0], tintedRgb[1], tintedRgb[2], baseAlpha],
-    alphaMode: hasTranslucency ? 'BLEND' : 'OPAQUE',
-    alphaCutoff: null,
+    baseColorFactor: [rgba[0], rgba[1], rgba[2], baseAlpha],
+    alphaMode,
+    alphaCutoff,
     doubleSided: hasTranslucency,
     textureKey: textureUri,
     textureUri,
-    textureAnimation,
+    textureAnimation: null,
   };
-
-  return out;
 }
 
 export function rgbaFromArgb(argb) {
@@ -91,228 +101,43 @@ function blockStateName(state) {
   return state;
 }
 
-function resolveTextureUri(blockState, blockId, textureLookup, facing) {
-  if (!textureLookup || typeof textureLookup !== 'object')
-    return null;
+function resolveTextureUri(blockState, blockId, options = {}) {
+  const derivedBlockId = resolveTextureBlockId(blockState, blockId);
+  return deriveTextureUriFromBlockId(derivedBlockId, options.textureUriPrefix);
+}
 
-  const resolveEntry = (entry) => {
-    if (typeof entry === 'string' && entry.length > 0)
-      return entry;
-    if (entry && typeof entry === 'object' && facing) {
-      if (entry[facing] === null)
-        return false;
-      if (typeof entry[facing] === 'string')
-        return entry[facing];
-
-      const fallbackMap = {
-        up: 'top',
-        down: 'bottom',
-        north: 'side',
-        south: 'side',
-        east: 'side',
-        west: 'side',
-      };
-      const fb = fallbackMap[facing];
-      if (fb) {
-        if (entry[fb] === null)
-          return false;
-        if (typeof entry[fb] === 'string')
-          return entry[fb];
-      }
-
-      const sideFb = 'side';
-      if (facing !== 'up' && facing !== 'down') {
-         // already checked specific + 'side' via fallbackMap, mostly just explicit side check here if needed?
-         // map implies north->side.
-      }
-
-      if (entry.all === null)
-        return false;
-      if (typeof entry.all === 'string')
-        return entry.all;
-    }
-    return undefined;
-  };
-
-  const byBlockState = textureLookup.byBlockState;
-  const byBlockId = textureLookup.byBlockId;
-  
-  if (byBlockState && typeof byBlockState === 'object') {
-    const res = resolveEntry(byBlockState[blockState]);
-    if (res !== undefined) return res;
-
-    const canonical = canonicalizeBlockState(blockState);
-    const resCanonical = resolveEntry(byBlockState[canonical]);
-    if (resCanonical !== undefined) return resCanonical;
+function resolveTextureBlockId(blockState, blockId) {
+  const stateWithProps = normalizeLegacyStateKey(String(blockState ?? '').trim());
+  if (stateWithProps) {
+    const stateAlias = LEGACY_TEXTURE_ALIAS_MAP[stateWithProps];
+    if (stateAlias)
+      return stateAlias;
   }
 
-  if (byBlockId && typeof byBlockId === 'object') {
-    const res = resolveEntry(byBlockId[blockId]);
-    if (res !== undefined) return res;
-  }
+  const primary = blockStateName(String(blockId ?? '').trim());
+  const fallback = blockStateName(String(blockState ?? '').trim());
 
-  const aliases = legacyTextureAliases(blockState, blockId);
-  for (const alias of aliases) {
-    if (byBlockState && typeof byBlockState === 'object') {
-      const res = resolveEntry(byBlockState[alias]);
-      if (res !== undefined) return res;
-      
-      const resCanonical = resolveEntry(byBlockState[canonicalizeBlockState(alias)]);
-      if (resCanonical !== undefined) return resCanonical;
+  for (const candidate of [fallback, primary]) {
+    const normalized = normalizeLegacyStateKey(candidate);
+    if (!normalized)
+      continue;
+
+    const directAlias = LEGACY_TEXTURE_ALIAS_MAP[normalized];
+    if (directAlias)
+      return directAlias;
+
+    const strippedLegacyMeta = normalized.replace(/:-?\d+$/, '');
+    if (strippedLegacyMeta !== normalized) {
+      const strippedAlias = LEGACY_TEXTURE_ALIAS_MAP[strippedLegacyMeta];
+      if (strippedAlias)
+        return strippedAlias;
+      return strippedLegacyMeta;
     }
-    if (byBlockId && typeof byBlockId === 'object') {
-      const res = resolveEntry(byBlockId[alias]);
-      if (res !== undefined) return res;
-    }
+
+    return normalized;
   }
 
   return null;
-}
-
-function resolveTextureAnimation(textureUri, textureLookup) {
-  const key = String(textureUri ?? '').trim();
-  if (!key)
-    return null;
-  if (!textureLookup || typeof textureLookup !== 'object')
-    return null;
-  const byTextureUri = textureLookup.animationByTextureUri;
-  if (!byTextureUri || typeof byTextureUri !== 'object')
-    return null;
-  const metadata = byTextureUri[key];
-  if (!metadata || typeof metadata !== 'object')
-    return null;
-  return metadata;
-}
-
-function resolveTextureHasAlpha(textureUri, textureLookup) {
-  const key = String(textureUri ?? '').trim();
-  if (!key)
-    return false;
-  if (!textureLookup || typeof textureLookup !== 'object')
-    return false;
-  const byTextureUri = textureLookup.alphaByTextureUri;
-  if (!byTextureUri || typeof byTextureUri !== 'object')
-    return false;
-  return byTextureUri[key] === true;
-}
-
-function resolveTintRgb(blockState, blockId, textureLookup) {
-  if (!textureLookup || typeof textureLookup !== 'object')
-    return null;
-
-  const byBlockState = textureLookup.tintByBlockState;
-  const byBlockId = textureLookup.tintByBlockId;
-
-  const stateCandidates = [
-    blockState,
-    canonicalizeBlockState(blockState),
-  ];
-  for (const candidate of stateCandidates) {
-    if (!candidate || !byBlockState || typeof byBlockState !== 'object')
-      continue;
-    const tint = normalizeTintRgb(byBlockState[candidate]);
-    if (tint)
-      return tint;
-  }
-
-  if (byBlockId && typeof byBlockId === 'object') {
-    const tint = normalizeTintRgb(byBlockId[blockId]);
-    if (tint)
-      return tint;
-  }
-
-  const aliases = legacyTextureAliases(blockState, blockId);
-  for (const alias of aliases) {
-    if (byBlockState && typeof byBlockState === 'object') {
-      const tint = normalizeTintRgb(byBlockState[alias] ?? byBlockState[canonicalizeBlockState(alias)]);
-      if (tint)
-        return tint;
-    }
-    if (byBlockId && typeof byBlockId === 'object') {
-      const tint = normalizeTintRgb(byBlockId[alias]);
-      if (tint)
-        return tint;
-    }
-  }
-
-  return null;
-}
-
-function canonicalizeBlockState(state) {
-  const raw = String(state ?? '').trim();
-  const index = raw.indexOf('[');
-  if (index < 0)
-    return raw;
-
-  const name = raw.slice(0, index);
-  const end = raw.lastIndexOf(']');
-  const body = end > index ? raw.slice(index + 1, end) : '';
-  if (!body.trim())
-    return name;
-
-  const map = new Map();
-  for (const partRaw of body.split(',')) {
-    const part = partRaw.trim();
-    if (!part)
-      continue;
-    const eq = part.indexOf('=');
-    if (eq <= 0 || eq >= part.length - 1)
-      continue;
-    const key = part.slice(0, eq).trim();
-    const value = part.slice(eq + 1).trim();
-    if (!key || !value)
-      continue;
-    map.set(key, value);
-  }
-  if (map.size === 0)
-    return name;
-
-  const pairs = [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  return `${name}[${pairs.map(([k, v]) => `${k}=${v}`).join(',')}]`;
-}
-
-function applyTintRgb(rgb, tintRgb) {
-  if (!Array.isArray(tintRgb))
-    return rgb;
-  return [
-    clamp01(rgb[0] * tintRgb[0]),
-    clamp01(rgb[1] * tintRgb[1]),
-    clamp01(rgb[2] * tintRgb[2]),
-  ];
-}
-
-function normalizeTintRgb(value) {
-  if (!Number.isInteger(value))
-    return null;
-  const tint = value & 0xFFFFFF;
-  return [
-    ((tint >>> 16) & 255) / 255,
-    ((tint >>> 8) & 255) / 255,
-    (tint & 255) / 255,
-  ];
-}
-
-function legacyTextureAliases(blockState, blockId) {
-  const out = [];
-  const normalizedState = normalizeLegacyStateKey(blockState);
-  const normalizedId = normalizeLegacyStateKey(blockId);
-
-  pushLegacyAlias(out, LEGACY_TEXTURE_ALIAS_MAP[normalizedState]);
-  pushLegacyAlias(out, LEGACY_TEXTURE_ALIAS_MAP[normalizedId]);
-
-  // Legacy variant IDs can include metadata suffixes (`namespace:block:meta`).
-  if (normalizedState.includes(':')) {
-    const strippedState = normalizedState.replace(/:-?\d+$/, '');
-    if (strippedState !== normalizedState)
-      pushLegacyAlias(out, LEGACY_TEXTURE_ALIAS_MAP[strippedState]);
-  }
-  if (normalizedId.includes(':')) {
-    const strippedId = normalizedId.replace(/:-?\d+$/, '');
-    if (strippedId !== normalizedId)
-      pushLegacyAlias(out, LEGACY_TEXTURE_ALIAS_MAP[strippedId]);
-  }
-
-  return out;
 }
 
 function normalizeLegacyStateKey(value) {
@@ -320,12 +145,34 @@ function normalizeLegacyStateKey(value) {
   return raw;
 }
 
-function pushLegacyAlias(out, alias) {
-  if (!alias || typeof alias !== 'string')
-    return;
-  if (out.includes(alias))
-    return;
-  out.push(alias);
+function deriveTextureUriFromBlockId(blockId, uriPrefixRaw) {
+  const raw = String(blockId ?? '').trim();
+  if (!raw)
+    return null;
+
+  const [namespaceRaw, pathRaw] = raw.includes(':')
+    ? raw.split(':', 2)
+    : ['minecraft', raw];
+  const namespace = namespaceRaw.trim();
+  const pathPart = pathRaw.trim();
+  if (!namespace || !pathPart)
+    return null;
+
+  const uriPrefix = normalizeUriPrefix(uriPrefixRaw);
+  return `${uriPrefix}textures/${namespace}/block/${pathPart}.png`;
+}
+
+function normalizeUriPrefix(valueRaw) {
+  const value = String(valueRaw ?? '').trim();
+  if (!value)
+    return '';
+  return value.endsWith('/') ? value : `${value}/`;
+}
+
+function normalizeAlphaCutoff(value, fallback) {
+  if (!Number.isFinite(value))
+    return fallback;
+  return clamp01(value);
 }
 
 const LEGACY_TEXTURE_ALIAS_MAP = Object.freeze({
@@ -337,4 +184,7 @@ const LEGACY_TEXTURE_ALIAS_MAP = Object.freeze({
   'minecraft:stone:2': 'minecraft:polished_granite',
   'minecraft:stone:4': 'minecraft:polished_diorite',
   'minecraft:leaves:2': 'minecraft:birch_leaves',
+  'kirosblocks:rainbow_pillar_block': 'kirosblocks:rainbow_stripes_block',
+  'kirosblocks:rainbow_pillar_block[axis=y]': 'kirosblocks:rainbow_stripes_block',
+  'kirosblocks:rainbow_pillar_block[axis=z]': 'kirosblocks:rainbow_stripes_block',
 });

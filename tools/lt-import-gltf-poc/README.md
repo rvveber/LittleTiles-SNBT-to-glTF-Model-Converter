@@ -37,7 +37,7 @@ bun run src/cli.mjs ../../fixtures/inputs/empty\ wooden\ bucket.txt --out ./buck
 Textured export with URI prefix:
 
 ```bash
-bun run src/cli.mjs ../../fixtures/inputs/empty\ wooden\ bucket.txt --out ./bucket.textured.gltf --texture-uri-prefix /assets
+bun run src/cli.mjs ../../fixtures/inputs/empty\ wooden\ bucket.txt --out ./bucket.textured.gltf --texture-base-uri /assets
 ```
 
 Texture sampling is always pixel-crisp (nearest-neighbor).
@@ -95,13 +95,12 @@ npm run serve:textures
 - Converter `--optimize` enables additional post-process cleanup passes for web-viewer-oriented output.
 - `writeGltf` emits `TEXCOORD_0` UVs for all faces so texture materials render correctly.
 - Converter writes glTF texture samplers as nearest-neighbor for pixel-crisp rendering.
-- Converter derives texture URIs from block IDs/state names (`textures/<namespace>/block/<path>.png`) and does not require addon texture reports.
-- `--texture-uri-prefix` (alias `--texture-base-uri`) prepends a static prefix to all derived texture URIs.
+- Converter derives texture URIs from block IDs/state names (`textures/<namespace>/block/<path>.png`) only.
+- `--texture-base-uri` (alias `--texture-uri-prefix`) prepends a static prefix to all derived texture URIs.
 - `serve:textures` starts an Express static server on `http://127.0.0.1:4173`, serving `/fixtures/**` so existing glTF-relative texture URIs resolve directly.
 - `serve:textures` now returns a fallback PNG for missing requests under `/fixtures/outputs/textures/textures/**/*.png` (disable with `--no-missing-texture-fallback` or provide custom fallback via `--missing-texture <path>`).
 - Converter or parity-check `--geometry-mode server` preserves parity-focused server-face semantics.
 - Running parity-check in `client` mode against older server-semantics `faceStates` fixtures may fail on transformable-heavy cases by design.
-- Converter can emit static `KHR_texture_transform` for known non-square textures (top-frame crop only; no runtime animation tracks).
 - Texture files are not required at conversion time; missing URIs are allowed by design.
 
 ## Known Open Items (2026-02-11)

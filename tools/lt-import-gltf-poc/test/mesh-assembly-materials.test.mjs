@@ -14,6 +14,46 @@ function quad(z) {
   ];
 }
 
+function northFaceQuad() {
+  // Match faceVerticesFromPlaneRect({ axis: 'z', sign: -1, ... }).
+  return [
+    [1, 0, 0],
+    [0, 0, 0],
+    [0, 1, 0],
+    [1, 1, 0],
+  ];
+}
+
+function southFaceQuad() {
+  // Match faceVerticesFromPlaneRect({ axis: 'z', sign: +1, ... }).
+  return [
+    [0, 0, 1],
+    [1, 0, 1],
+    [1, 1, 1],
+    [0, 1, 1],
+  ];
+}
+
+function westFaceQuad() {
+  // Match faceVerticesFromPlaneRect({ axis: 'x', sign: -1, ... }).
+  return [
+    [0, 0, 1],
+    [0, 1, 1],
+    [0, 1, 0],
+    [0, 0, 0],
+  ];
+}
+
+function eastFaceQuad() {
+  // Match faceVerticesFromPlaneRect({ axis: 'x', sign: +1, ... }).
+  return [
+    [1, 0, 0],
+    [1, 1, 0],
+    [1, 1, 1],
+    [1, 0, 1],
+  ];
+}
+
 test('facesToPrimitiveMeshes groups by resolved material key', () => {
   const faces = [
     {
@@ -83,7 +123,7 @@ test('writeGltf writes baseColorFactor and alphaMode from material resolver', ()
     const gltf = JSON.parse(readFileSync(gltfPath, 'utf8'));
     assert.equal(gltf.materials.length, 2);
     const alphaModes = new Set(gltf.materials.map((m) => m.alphaMode));
-    assert.ok(alphaModes.has('OPAQUE'));
+    assert.ok(alphaModes.has('MASK'));
     assert.ok(alphaModes.has('BLEND'));
 
     for (const material of gltf.materials) {
@@ -150,7 +190,7 @@ test('writeGltf writes image/texture entries when material has texture URI', () 
   }
 });
 
-test('writeGltf emits KHR_texture_transform for static top-frame texture cropping', () => {
+test('writeGltf emits KHR_texture_transform from texture animation UV transform', () => {
   const faces = [
     {
       blockState: 'example:non_square',
@@ -175,9 +215,14 @@ test('writeGltf emits KHR_texture_transform for static top-frame texture croppin
       doubleSided: false,
       textureKey: 'textures/example/block/non_square.png',
       textureUri: 'textures/example/block/non_square.png',
-      textureTransform: {
-        scale: [1, 0.25],
-        offset: [0, 0],
+      textureAnimation: {
+        frameTime: 1,
+        frameCount: 4,
+        frames: [{ index: 0, time: 1 }],
+        uvTransform: {
+          scale: [1, 0.25],
+          offset: [0, 0],
+        },
       },
     }),
   });
@@ -191,6 +236,7 @@ test('writeGltf emits KHR_texture_transform for static top-frame texture croppin
 
     assert.ok(Array.isArray(gltf.extensionsUsed));
     assert.ok(gltf.extensionsUsed.includes('KHR_texture_transform'));
+    assert.ok(gltf.extensionsUsed.includes('KHR_animation_pointer'));
     assert.deepEqual(
       gltf.materials[0].pbrMetallicRoughness.baseColorTexture.extensions.KHR_texture_transform.scale,
       [1, 0.25]
@@ -199,7 +245,8 @@ test('writeGltf emits KHR_texture_transform for static top-frame texture croppin
       gltf.materials[0].pbrMetallicRoughness.baseColorTexture.extensions.KHR_texture_transform.offset,
       [0, 0]
     );
-    assert.equal(gltf.animations, undefined);
+    assert.ok(Array.isArray(gltf.animations));
+    assert.equal(gltf.animations.length, 1);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
@@ -230,7 +277,7 @@ test('writeGltf emits no extensions when texture has no transform', () => {
       doubleSided: false,
       textureKey: 'textures/example/block/static.png',
       textureUri: 'textures/example/block/static.png',
-      textureTransform: null,
+      textureAnimation: null,
     }),
   });
 
@@ -245,4 +292,205 @@ test('writeGltf emits no extensions when texture has no transform', () => {
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('axis UV orientation matches Minecraft north/south defaults', () => {
+  const faces = [
+    {
+      blockState: 'example:north',
+      blockId: 'example:north',
+      color: -1,
+      providesSolidFace: true,
+      sourceKind: 'aabb',
+      facing: 'NORTH',
+      faceType: 'axis',
+      outside: true,
+      vertices: northFaceQuad(),
+    },
+    {
+      blockState: 'example:south',
+      blockId: 'example:south',
+      color: -1,
+      providesSolidFace: true,
+      sourceKind: 'aabb',
+      facing: 'SOUTH',
+      faceType: 'axis',
+      outside: true,
+      vertices: southFaceQuad(),
+    },
+  ];
+
+  const assembled = facesToPrimitiveMeshes(faces, {
+    resolveMaterial: (face) => ({
+      materialKey: `${face.blockId}|mat`,
+      materialName: face.blockId,
+      baseColorFactor: [1, 1, 1, 1],
+      alphaMode: 'OPAQUE',
+      alphaCutoff: null,
+      doubleSided: false,
+      textureKey: `textures/${face.blockId}.png`,
+      textureUri: `textures/${face.blockId}.png`,
+    }),
+  });
+
+  assert.equal(assembled.meshes.length, 2);
+  const north = assembled.meshes.find((mesh) => mesh.name === 'example:north');
+  const south = assembled.meshes.find((mesh) => mesh.name === 'example:south');
+  assert.ok(north);
+  assert.ok(south);
+
+  const northUvs = [];
+  for (let i = 0; i < north.uvs.length; i += 2)
+    northUvs.push([north.uvs[i], north.uvs[i + 1]]);
+
+  const southUvs = [];
+  for (let i = 0; i < south.uvs.length; i += 2)
+    southUvs.push([south.uvs[i], south.uvs[i + 1]]);
+
+  assert.deepEqual(northUvs, [
+    [0, 1],
+    [1, 1],
+    [1, 0],
+    [0, 0],
+  ]);
+  assert.deepEqual(southUvs, [
+    [0, 1],
+    [1, 1],
+    [1, 0],
+    [0, 0],
+  ]);
+});
+
+test('axis UV orientation matches Minecraft east/west defaults', () => {
+  const faces = [
+    {
+      blockState: 'example:west',
+      blockId: 'example:west',
+      color: -1,
+      providesSolidFace: true,
+      sourceKind: 'aabb',
+      facing: 'WEST',
+      faceType: 'axis',
+      outside: true,
+      vertices: westFaceQuad(),
+    },
+    {
+      blockState: 'example:east',
+      blockId: 'example:east',
+      color: -1,
+      providesSolidFace: true,
+      sourceKind: 'aabb',
+      facing: 'EAST',
+      faceType: 'axis',
+      outside: true,
+      vertices: eastFaceQuad(),
+    },
+  ];
+
+  const assembled = facesToPrimitiveMeshes(faces, {
+    resolveMaterial: (face) => ({
+      materialKey: `${face.blockId}|mat`,
+      materialName: face.blockId,
+      baseColorFactor: [1, 1, 1, 1],
+      alphaMode: 'OPAQUE',
+      alphaCutoff: null,
+      doubleSided: false,
+      textureKey: `textures/${face.blockId}.png`,
+      textureUri: `textures/${face.blockId}.png`,
+    }),
+  });
+
+  assert.equal(assembled.meshes.length, 2);
+  const west = assembled.meshes.find((mesh) => mesh.name === 'example:west');
+  const east = assembled.meshes.find((mesh) => mesh.name === 'example:east');
+  assert.ok(west);
+  assert.ok(east);
+
+  const westUvs = [];
+  for (let i = 0; i < west.uvs.length; i += 2)
+    westUvs.push([west.uvs[i], west.uvs[i + 1]]);
+
+  const eastUvs = [];
+  for (let i = 0; i < east.uvs.length; i += 2)
+    eastUvs.push([east.uvs[i], east.uvs[i + 1]]);
+
+  assert.deepEqual(westUvs, [
+    [1, 1],
+    [1, 0],
+    [0, 0],
+    [0, 1],
+  ]);
+  assert.deepEqual(eastUvs, [
+    [1, 1],
+    [1, 0],
+    [0, 0],
+    [0, 1],
+  ]);
+});
+
+test('axis=z state rotates UV basis for side faces', () => {
+  const faces = [
+    {
+      blockState: 'minecraft:oak_log[axis=y]',
+      blockId: 'minecraft:oak_log',
+      color: -1,
+      providesSolidFace: true,
+      sourceKind: 'aabb',
+      facing: 'EAST',
+      faceType: 'axis',
+      outside: true,
+      vertices: eastFaceQuad(),
+    },
+    {
+      blockState: 'minecraft:oak_log[axis=z]',
+      blockId: 'minecraft:oak_log',
+      color: -1,
+      providesSolidFace: true,
+      sourceKind: 'aabb',
+      facing: 'EAST',
+      faceType: 'axis',
+      outside: true,
+      vertices: eastFaceQuad(),
+    },
+  ];
+
+  const assembled = facesToPrimitiveMeshes(faces, {
+    resolveMaterial: (face) => ({
+      materialKey: `${face.blockState}|mat`,
+      materialName: face.blockState,
+      baseColorFactor: [1, 1, 1, 1],
+      alphaMode: 'OPAQUE',
+      alphaCutoff: null,
+      doubleSided: false,
+      textureKey: `textures/${face.blockId}.png`,
+      textureUri: `textures/${face.blockId}.png`,
+    }),
+  });
+
+  assert.equal(assembled.meshes.length, 2);
+  const axisY = assembled.meshes.find((mesh) => mesh.name === 'minecraft:oak_log[axis=y]');
+  const axisZ = assembled.meshes.find((mesh) => mesh.name === 'minecraft:oak_log[axis=z]');
+  assert.ok(axisY);
+  assert.ok(axisZ);
+
+  const axisYUvs = [];
+  for (let i = 0; i < axisY.uvs.length; i += 2)
+    axisYUvs.push([axisY.uvs[i], axisY.uvs[i + 1]]);
+
+  const axisZUvs = [];
+  for (let i = 0; i < axisZ.uvs.length; i += 2)
+    axisZUvs.push([axisZ.uvs[i], axisZ.uvs[i + 1]]);
+
+  assert.deepEqual(axisYUvs, [
+    [1, 1],
+    [1, 0],
+    [0, 0],
+    [0, 1],
+  ]);
+  assert.deepEqual(axisZUvs, [
+    [0, 1],
+    [1, 1],
+    [1, 0],
+    [0, 0],
+  ]);
 });

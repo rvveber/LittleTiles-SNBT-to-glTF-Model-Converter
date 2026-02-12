@@ -30,7 +30,7 @@ for (const fixtureName of FIXTURES) {
     const actual = collectRenderableFaceCandidateSummary(parsed, {
       evaluateInternalOcclusion: true,
       runtime: debug.runtime,
-      geometryMode: 'server',
+      geometryMode: resolveFixtureGeometryMode(debug),
     });
     const expected = summarizeDebugRenderableFaceStates(debug.root);
 
@@ -38,6 +38,11 @@ for (const fixtureName of FIXTURES) {
     assert.deepEqual(actual.byFacing, expected.byFacing);
     assert.deepEqual(actual.byOutside, expected.byOutside);
   });
+}
+
+function resolveFixtureGeometryMode(debug) {
+  const mode = typeof debug?.geometryMode === 'string' ? debug.geometryMode.trim().toLowerCase() : '';
+  return mode === 'client' || mode === 'server' ? mode : 'server';
 }
 
 test('runtime face behavior profile: runtime profile resolver', () => {

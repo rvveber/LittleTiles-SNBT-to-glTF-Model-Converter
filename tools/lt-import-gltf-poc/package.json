@@ -9,6 +9,7 @@
   },
   "scripts": {
     "convert": "bun run src/cli.mjs",
+    "reconvert:fixtures": "node src/reconvert-fixtures.mjs",
     "serve:textures": "node src/texture-server.mjs",
     "parity-check": "bun run src/parity-debug-check.mjs",
     "parity-check:json": "bun run src/parity-debug-check.mjs --json",

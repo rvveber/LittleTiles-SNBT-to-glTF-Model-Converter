@@ -4,3 +4,6 @@
 [submodule "CreativeCore"]
 	path = subrepos/CreativeCore
 	url = https://github.com/CreativeMD/CreativeCore
+[submodule "subrepos/glTF-Sample-Viewer"]
+	path = subrepos/glTF-Sample-Viewer
+	url = https://github.com/KhronosGroup/glTF-Sample-Viewer
